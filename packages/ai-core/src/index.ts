@@ -9,3 +9,5 @@ export * from "./analysis-scheduler";
 export * from "./pair-programming";
 export * from "./ai-skill";
 export * from "./workflow-engine";
+export * from "./agents";
+export * from "./deep-code-intelligence";
