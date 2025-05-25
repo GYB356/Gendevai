@@ -1,0 +1,586 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+  tasks         Task[]
+  teams         TeamMember[]
+  repoAccess    RepoAccess[]
+  preferences   UserPreference?
+  agentHistory  AgentInteraction[]
+  suggestions   CodeSuggestion[]
+  pairSessions  PairProgrammingSession[]
+  createdSkills AISkill[]
+  createdWorkflows AgentWorkflow[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  tasks       Task[]
+  teamId      String?
+  team        Team?    @relation(fields: [teamId], references: [id])
+  repositories Repository[]
+  interactions AgentInteraction[]
+  opportunities CodebaseOpportunity[]
+  analysisReports AnalysisReport[]
+  analysisSchedules AnalysisSchedule[]
+  suggestions CodeSuggestion[]
+  pairSessions PairProgrammingSession[]
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  codeGeneration CodeGeneration?
+  codeReview     CodeReview?
+  assignedTo     String?
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+model CodeGeneration {
+  id          String   @id @default(cuid())
+  prompt      String
+  result      String?  @db.Text
+  status      GenerationStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  taskId      String   @unique
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+enum GenerationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// New models for team collaboration and version control
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  members     TeamMember[]
+  projects    Project[]
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  role      TeamRole @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, teamId])
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model Repository {
+  id          String   @id @default(cuid())
+  name        String
+  provider    VcsProvider
+  externalId  String
+  url         String
+  defaultBranch String  @default("main")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  access      RepoAccess[]
+  opportunities CodebaseOpportunity[]
+  reports     AnalysisReport[]
+  schedules   AnalysisSchedule[]
+}
+
+model RepoAccess {
+  id          String   @id @default(cuid())
+  permission  RepoPermission @default(READ)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  repoId      String
+  repository  Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, repoId])
+}
+
+enum RepoPermission {
+  READ
+  WRITE
+  ADMIN
+}
+
+enum VcsProvider {
+  GITHUB
+  GITLAB
+  BITBUCKET
+}
+
+model CodeReview {
+  id          String   @id @default(cuid())
+  code        String   @db.Text
+  review      String?  @db.Text
+  language    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  taskId      String   @unique
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+// User Preferences and Agent Personalization Models
+
+model UserPreference {
+  id                      String   @id @default(cuid())
+  codingStyle             String?  @db.Text
+  codeVerbosityLevel      Int      @default(2) // 1-5 scale (1: minimal, 5: highly detailed)
+  preferredLanguages      String[] // Programming languages the user prefers
+  preferredFrameworks     String[] // Frameworks the user prefers
+  documentationLevel      Int      @default(2) // 1-5 scale
+  securityFocusLevel      Int      @default(3) // 1-5 scale
+  testCoveragePreference  Int      @default(3) // 1-5 scale
+  defaultAgentPersona     String?  // Reference to preferred agent persona
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  
+  userId                  String   @unique
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AgentPersona {
+  id               String   @id @default(cuid())
+  name             String
+  description      String   @db.Text
+  systemPrompt     String   @db.Text
+  strengths        String[] // What this persona is good at
+  focusAreas       String[] // Areas this persona focuses on
+  temperatureRange Float[]  // Min and max temperature [0.0, 0.7] 
+  skillTags        String[] // Tags for skills this persona excels at
+  isPublic         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  creatorId        String?
+  interactions     AgentInteraction[]
+}
+
+model AgentInteraction {
+  id               String   @id @default(cuid())
+  taskType         String   // Type of task performed
+  inputContext     String   @db.Text // What the user asked for
+  outputResult     String   @db.Text // What the agent produced
+  feedbackRating   Int?     // User rating (1-5)
+  feedbackComment  String?  @db.Text // User feedback
+  performanceMetrics Json?   // Various metrics about the interaction
+  createdAt        DateTime @default(now())
+  
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  personaId        String?
+  persona          AgentPersona? @relation(fields: [personaId], references: [id], onDelete: SetNull)
+  
+  projectId        String?
+  project          Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+}
+
+// Codebase Analysis and Opportunity Finding Models
+
+enum OpportunityType {
+  TECH_DEBT
+  SECURITY_VULNERABILITY
+  PERFORMANCE_ISSUE
+  OUTDATED_DEPENDENCY
+  MISSING_DOCUMENTATION
+  POTENTIAL_BUG
+  CODE_SMELL
+  REFACTORING_OPPORTUNITY
+}
+
+enum OpportunitySeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model CodebaseOpportunity {
+  id               String   @id @default(cuid())
+  type             OpportunityType
+  title            String
+  description      String   @db.Text
+  severity         OpportunitySeverity
+  filePath         String?
+  lineStart        Int?
+  lineEnd          Int?
+  suggestedFix     String?  @db.Text
+  codeSnippet      String?  @db.Text
+  isResolved       Boolean  @default(false)
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  repositoryId     String
+  repository       Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  projectId        String
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  reportId         String
+  report           AnalysisReport @relation(fields: [reportId], references: [id])
+}
+
+model AnalysisReport {
+  id               String   @id @default(cuid())
+  summary          String   @db.Text
+  opportunityCount Int
+  status           String
+  createdAt        DateTime @default(now())
+  
+  repositoryId     String
+  repository       Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  projectId        String
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  opportunities    CodebaseOpportunity[]
+}
+
+model AnalysisSchedule {
+  id               String   @id @default(cuid())
+  frequency        String   // daily, weekly, monthly
+  opportunityTypes String[] // OpportunityType values as strings
+  fileExtensions   String[] // File extensions to analyze
+  isActive         Boolean  @default(true)
+  lastRunAt        DateTime?
+  nextRunAt        DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  repositoryId     String
+  repository       Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  projectId        String
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Pair Programming Models
+
+enum SuggestionType {
+  COMPLETION
+  REFACTORING
+  OPTIMIZATION
+  DOCUMENTATION
+  TEST
+  BUG_FIX
+}
+
+model CodeSuggestion {
+  id               String   @id @default(cuid())
+  type             SuggestionType
+  originalCode     String   @db.Text
+  suggestedCode    String   @db.Text
+  explanation      String   @db.Text
+  confidence       Float
+  startLine        Int
+  endLine          Int
+  filePath         String
+  language         String
+  isApplied        Boolean  @default(false)
+  appliedAt        DateTime?
+  createdAt        DateTime @default(now())
+  
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  projectId        String?
+  project          Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  
+  feedback         SuggestionFeedback?
+  alternatives     AlternativeSuggestion[]
+}
+
+model AlternativeSuggestion {
+  id               String   @id @default(cuid())
+  suggestedCode    String   @db.Text
+  explanation      String   @db.Text
+  confidence       Float
+  isApplied        Boolean  @default(false)
+  appliedAt        DateTime?
+  createdAt        DateTime @default(now())
+  
+  suggestionId     String
+  suggestion       CodeSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+}
+
+model SuggestionFeedback {
+  id               String   @id @default(cuid())
+  rating           Int      // 1-5 rating
+  comment          String?  @db.Text
+  createdAt        DateTime @default(now())
+  
+  suggestionId     String   @unique
+  suggestion       CodeSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+}
+
+model PairProgrammingSession {
+  id               String   @id @default(cuid())
+  startedAt        DateTime @default(now())
+  endedAt          DateTime?
+  duration         Int?     // Duration in seconds
+  filesProgrammed  String[] // Files worked on during the session
+  
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  projectId        String?
+  project          Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+}
+
+// AI Skill Components and Marketplace Models
+
+enum SkillCategory {
+  CODE_GENERATION
+  CODE_REVIEW
+  REFACTORING
+  TESTING
+  DOCUMENTATION
+  OPTIMIZATION
+  SECURITY
+  ARCHITECTURE
+  DEVOPS
+  OTHER
+}
+
+enum SkillComplexity {
+  BASIC
+  INTERMEDIATE
+  ADVANCED
+}
+
+model AISkill {
+  id               String   @id @default(cuid())
+  name             String
+  description      String   @db.Text
+  category         SkillCategory
+  complexity       SkillComplexity @default(INTERMEDIATE)
+  systemPrompt     String   @db.Text
+  userPromptTemplate String  @db.Text
+  inputSchema      Json     // JSON schema for input parameters
+  outputSchema     Json?    // Optional JSON schema for output validation
+  exampleInputs    Json[]   // Example inputs as JSON objects
+  exampleOutputs   Json[]   // Example outputs as JSON objects
+  tags             String[]
+  isPublic         Boolean  @default(false)
+  isVerified       Boolean  @default(false)
+  version          String   @default("1.0.0")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  creatorId        String
+  creator          User     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  
+  ratings          SkillRating[]
+  usageStats       SkillUsageStats?
+  price            SkillPrice?
+  usedInWorkflows  AgentWorkflowNode[]
+}
+
+model SkillRating {
+  id               String   @id @default(cuid())
+  rating           Int      // 1-5 rating
+  comment          String?  @db.Text
+  createdAt        DateTime @default(now())
+  
+  skillId          String
+  skill            AISkill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  
+  userId           String
+}
+
+model SkillUsageStats {
+  id               String   @id @default(cuid())
+  totalExecutions  Int      @default(0)
+  uniqueUsers      Int      @default(0)
+  averageExecutionTimeMs Int @default(0)
+  successRate      Float    @default(0.0)
+  lastExecutedAt   DateTime?
+  updatedAt        DateTime @updatedAt
+  
+  skillId          String   @unique
+  skill            AISkill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+}
+
+model SkillPrice {
+  id               String   @id @default(cuid())
+  amount           Float    // Price in USD
+  isSubscription   Boolean  @default(false)
+  trialPeriodDays  Int?     // Free trial period if applicable
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  skillId          String   @unique
+  skill            AISkill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  
+  purchases        SkillPurchase[]
+}
+
+model SkillPurchase {
+  id               String   @id @default(cuid())
+  transactionId    String?
+  status           String   // "completed", "pending", "failed"
+  purchaseDate     DateTime @default(now())
+  expirationDate   DateTime?
+  
+  userId           String
+  
+  priceId          String
+  price            SkillPrice @relation(fields: [priceId], references: [id], onDelete: Cascade)
+}
+
+// Workflow models for combining skills
+
+model AgentWorkflow {
+  id               String   @id @default(cuid())
+  name             String
+  description      String   @db.Text
+  isPublic         Boolean  @default(false)
+  isVerified       Boolean  @default(false)
+  version          String   @default("1.0.0")
+  workflowDefinition Json   // JSON representation of the workflow DAG
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  creatorId        String
+  creator          User     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  
+  nodes            AgentWorkflowNode[]
+  executions       WorkflowExecution[]
+}
+
+model AgentWorkflowNode {
+  id               String   @id @default(cuid())
+  nodeType         String   // "skill", "condition", "input", "output"
+  position         Json     // X, Y coordinates for UI
+  config           Json     // Node-specific configuration
+  
+  workflowId       String
+  workflow         AgentWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  skillId          String?
+  skill            AISkill? @relation(fields: [skillId], references: [id], onDelete: SetNull)
+}
+
+model WorkflowExecution {
+  id               String   @id @default(cuid())
+  status           String   // "running", "completed", "failed"
+  startTime        DateTime @default(now())
+  endTime          DateTime?
+  result           Json?    // Final result of the workflow
+  logs             Json[]   // Execution logs for each step
+  
+  workflowId       String
+  workflow         AgentWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  userId           String   // User who executed the workflow
+}

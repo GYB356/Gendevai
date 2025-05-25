@@ -1,0 +1,54 @@
+# Base node image
+FROM node:18-alpine AS base
+
+# Install dependencies
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Copy package files for installation
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
+COPY packages/ai-core/package.json ./packages/ai-core/package.json
+COPY packages/database/package.json ./packages/database/package.json
+COPY packages/eslint-config/package.json ./packages/eslint-config/package.json
+COPY packages/tsconfig/package.json ./packages/tsconfig/package.json
+COPY apps/worker/package.json ./apps/worker/package.json
+
+# Install dependencies
+RUN npm install -g pnpm
+RUN pnpm install --frozen-lockfile
+
+# Setup builder
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/*/node_modules ./packages/*/node_modules
+COPY --from=deps /app/apps/*/node_modules ./apps/*/node_modules
+
+# Copy all files
+COPY . .
+
+# Generate Prisma client
+RUN npx -w @gendevai/database prisma generate
+
+# Build application
+RUN pnpm build
+
+# Production image
+FROM base AS worker
+WORKDIR /app
+
+ENV NODE_ENV production
+
+# Copy necessary files
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/database/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/apps/worker/dist ./dist
+COPY --from=builder /app/apps/worker/package.json ./package.json
+
+# Set user
+USER node
+
+# Start the application
+CMD ["npm", "start"]
