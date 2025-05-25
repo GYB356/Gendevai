@@ -13,7 +13,13 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:gendevai.start",
+    "onCommand:gendevai.showChat",
+    "onCommand:gendevai.showAgents",
+    "onCommand:gendevai.askQuestion",
+    "onCommand:gendevai.explainCode",
+    "onCommand:gendevai.improveCode"
   ],
   "main": "./dist/extension.js",
   "contributes": {
