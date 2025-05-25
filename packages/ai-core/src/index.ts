@@ -11,3 +11,5 @@ export * from "./ai-skill";
 export * from "./workflow-engine";
 export * from "./agents";
 export * from "./deep-code-intelligence";
+export * from "./error-handling";
+export * from "./logging";
