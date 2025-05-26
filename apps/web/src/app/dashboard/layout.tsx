@@ -12,7 +12,9 @@ import {
   GitBranch, 
   Users, 
   LineChart, 
-  ClipboardCheck 
+  ClipboardCheck,
+  BookOpen,
+  Workflow
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -93,6 +95,23 @@ export default function DashboardLayout({
                   Analytics
                 </Button>
               </Link>
+              
+              <div className="pt-4 pb-2">
+                <h4 className="px-2 text-xs font-semibold text-muted-foreground">Documentation</h4>
+              </div>
+              <Link href="/dashboard/documentation/advanced-workflows">
+                <Button variant="ghost" className="w-full justify-start gap-2">
+                  <Workflow className="h-4 w-4" />
+                  Advanced Workflows
+                </Button>
+              </Link>
+              <Link href="/dashboard/documentation/marketplace">
+                <Button variant="ghost" className="w-full justify-start gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  Marketplace
+                </Button>
+              </Link>
+              
               <Link href="/dashboard/settings">
                 <Button variant="ghost" className="w-full justify-start gap-2">
                   <Settings className="h-4 w-4" />

@@ -11,13 +11,22 @@ import {
 } from './error-handling';
 import { StructuredLogger } from './logging';
 import { ConfigManager } from './config';
+import { AnalyticsService } from './analytics';
+import { NaturalLanguageCodeService, CodeGenerationConfig } from './advanced-workflows/natural-language-code';
+import { AIDebuggingAssistant, ErrorContext } from './advanced-workflows/debugging-assistant';
+import { PredictiveResourceOptimizer, OptimizationContext } from './advanced-workflows/resource-optimizer';
+import { AnalyticsService } from './analytics';
+import { generateCodeFromNaturalLanguage } from './advanced-workflows/natural-language-code';
+import { analyzeCodeAndFixErrors } from './advanced-workflows/debugging-assistant';
+import { optimizeCodeForResources } from './advanced-workflows/resource-optimizer';
+import { AnalyticsService } from './analytics';
 
 /**
  * Interface for a workflow node
  */
 export interface WorkflowNode {
   id: string;
-  type: "skill" | "condition" | "input" | "output";
+  type: "skill" | "condition" | "input" | "output" | "codeGen" | "debugAssist" | "resourceOpt";
   skillId?: string;
   position: { x: number; y: number };
   config: Record<string, any>;
@@ -58,11 +67,13 @@ export class WorkflowExecutionEngine {
   private skillService: AISkillService;
   private logger: StructuredLogger;
   private configManager: ConfigManager;
+  private analyticsService: AnalyticsService;
   
   constructor(configManager?: ConfigManager) {
     this.configManager = configManager || new ConfigManager();
     this.skillService = new AISkillService();
     this.logger = StructuredLogger.getInstance();
+    this.analyticsService = new AnalyticsService();
 
     this.logger.info('Workflow execution engine initialized');
   }
@@ -115,7 +126,7 @@ export class WorkflowExecutionEngine {
           errors.push(`Node at position ${node.position?.x || 0},${node.position?.y || 0} must have a valid id`);
         }
 
-        if (!['skill', 'condition', 'input', 'output'].includes(node.type)) {
+        if (!['skill', 'condition', 'input', 'output', 'codeGen', 'debugAssist', 'resourceOpt'].includes(node.type)) {
           errors.push(`Node ${node.id} has invalid type: ${node.type}`);
         }
 
@@ -406,6 +417,7 @@ export class WorkflowExecutionEngine {
           }
 
           if (node.type === "skill") {
+            const nodeStartTime = Date.now();
             const apiTimeout = 30000; // Default timeout
             const maxRetries = 3; // Default retries
 
@@ -426,6 +438,8 @@ export class WorkflowExecutionEngine {
               apiTimeout
             );
 
+            const nodeDuration = Date.now() - nodeStartTime;
+
             if (result.success) {
               nodeOutputs[node.id] = result.output;
               
@@ -434,8 +448,34 @@ export class WorkflowExecutionEngine {
                 nodeId: node.id,
                 skillId: node.skillId
               });
+              
+              // Track successful node execution
+              this.analyticsService.trackNodeExecution({
+                workflowId: workflow.id,
+                workflowName: workflow.name,
+                executionId,
+                nodeId: node.id,
+                nodeType: node.type,
+                duration: nodeDuration,
+                inputSize: JSON.stringify(nodeInputs).length,
+                outputSize: JSON.stringify(result.output).length,
+                success: true
+              });
             } else {
               this.logger.error(`Skill node execution failed: ${result.error || 'Unknown error'}`);
+
+              // Track failed node execution
+              this.analyticsService.trackNodeExecution({
+                workflowId: workflow.id,
+                workflowName: workflow.name,
+                executionId,
+                nodeId: node.id,
+                nodeType: node.type,
+                duration: nodeDuration,
+                inputSize: JSON.stringify(nodeInputs).length,
+                success: false,
+                error: result.error
+              });
 
               throw new ModelError(`Skill execution failed: ${result.error}`, {
                 nodeId: node.id,
@@ -452,6 +492,218 @@ export class WorkflowExecutionEngine {
               error: result.error
             });
 
+          } else if (node.type === "codeGen") {
+            // Natural Language Code Generation Node
+            const nodeStartTime = Date.now();
+            const description = nodeInputs.description || node.config.defaultDescription;
+            if (!description) {
+              throw new ValidationError("Code generation requires a description");
+            }
+
+            const language = nodeInputs.language || node.config.language || "typescript";
+            const framework = nodeInputs.framework || node.config.framework || "none";
+            
+            this.logger.debug('Starting code generation', {
+              executionId,
+              nodeId: node.id,
+              language,
+              framework
+            });
+
+            const result = await withTimeout(
+              async () => {
+                const prompt = `Generate ${language} code for: ${description}\nFramework/Libraries: ${framework}`;
+                const response = await this.skillService.executeSkill(
+                  { id: "code-generator" } as any,
+                  { prompt, language, framework } as SkillInput
+                );
+                return response;
+              },
+              apiTimeout
+            );
+
+            const nodeDuration = Date.now() - nodeStartTime;
+
+            if (result.success) {
+              nodeOutputs[node.id] = {
+                code: result.output,
+                language,
+                description
+              };
+              
+              this.logger.debug('Code generation completed successfully', {
+                executionId,
+                nodeId: node.id,
+                language,
+                codeLength: result.output?.length || 0
+              });
+              
+              // Track successful code generation
+              this.analyticsService.trackNodeExecution({
+                workflowId: workflow.id,
+                workflowName: workflow.name,
+                executionId,
+                nodeId: node.id,
+                nodeType: node.type,
+                duration: nodeDuration,
+                inputSize: description.length,
+                outputSize: JSON.stringify(result.output).length,
+                success: true,
+                metrics: {
+                  language,
+                  framework,
+                  codeLength: result.output?.length || 0
+                }
+              });
+            } else {
+              this.logger.error(`Code generation failed: ${result.error || 'Unknown error'}`);
+              
+              // Track failed code generation
+              this.analyticsService.trackNodeExecution({
+                workflowId: workflow.id,
+                workflowName: workflow.name,
+                executionId,
+                nodeId: node.id,
+                nodeType: node.type,
+                duration: nodeDuration,
+                inputSize: description.length,
+                success: false,
+                error: result.error,
+                metrics: {
+                  language,
+                  framework
+                }
+              });
+              
+              throw new ModelError(`Code generation failed: ${result.error}`, {
+                nodeId: node.id,
+                language,
+                framework
+              });
+            }
+
+            events.push({
+              nodeId: node.id,
+              timestamp: new Date(),
+              status: "completed",
+              input: { description, language, framework },
+              output: nodeOutputs[node.id]
+            });
+            
+          } else if (node.type === "debugAssist") {
+            // AI-Powered Debugging Assistant Node
+            const code = nodeInputs.code || node.config.defaultCode;
+            const error = nodeInputs.error || node.config.defaultError;
+            
+            if (!code) {
+              throw new ValidationError("Debugging assistant requires code to analyze");
+            }
+            
+            this.logger.debug('Starting debugging assistance', {
+              executionId,
+              nodeId: node.id,
+              errorLength: error?.length || 0
+            });
+
+            const result = await withTimeout(
+              async () => {
+                return await this.skillService.executeSkill(
+                  { id: "debug-assistant" } as any,
+                  { 
+                    code, 
+                    error,
+                    context: nodeInputs.context || {},
+                    language: nodeInputs.language || node.config.language || "typescript"
+                  } as SkillInput
+                );
+              },
+              apiTimeout
+            );
+
+            if (result.success) {
+              nodeOutputs[node.id] = {
+                fix: result.output.fix,
+                explanation: result.output.explanation,
+                rootCause: result.output.rootCause
+              };
+              
+              this.logger.debug('Debugging assistance completed successfully', {
+                executionId,
+                nodeId: node.id,
+                fixFound: !!result.output.fix
+              });
+            } else {
+              this.logger.error(`Debugging assistance failed: ${result.error || 'Unknown error'}`);
+              throw new ModelError(`Debugging assistance failed: ${result.error}`, {
+                nodeId: node.id
+              });
+            }
+
+            events.push({
+              nodeId: node.id,
+              timestamp: new Date(),
+              status: "completed",
+              input: { code, error },
+              output: nodeOutputs[node.id]
+            });
+            
+          } else if (node.type === "resourceOpt") {
+            // Predictive Resource Optimization Node
+            const code = nodeInputs.code || node.config.defaultCode;
+            const context = nodeInputs.context || node.config.defaultContext || {};
+            
+            if (!code) {
+              throw new ValidationError("Resource optimization requires code to analyze");
+            }
+            
+            this.logger.debug('Starting resource optimization analysis', {
+              executionId,
+              nodeId: node.id,
+              codeLength: code.length
+            });
+
+            const result = await withTimeout(
+              async () => {
+                return await this.skillService.executeSkill(
+                  { id: "resource-optimizer" } as any,
+                  { 
+                    code, 
+                    context,
+                    targetMetrics: nodeInputs.targetMetrics || node.config.targetMetrics || ["memory", "cpu"],
+                    language: nodeInputs.language || node.config.language || "typescript"
+                  } as SkillInput
+                );
+              },
+              apiTimeout
+            );
+
+            if (result.success) {
+              nodeOutputs[node.id] = {
+                optimizations: result.output.optimizations,
+                predictedImprovements: result.output.predictedImprovements,
+                recommendations: result.output.recommendations
+              };
+              
+              this.logger.debug('Resource optimization completed successfully', {
+                executionId,
+                nodeId: node.id,
+                optimizationsCount: result.output.optimizations?.length || 0
+              });
+            } else {
+              this.logger.error(`Resource optimization failed: ${result.error || 'Unknown error'}`);
+              throw new ModelError(`Resource optimization failed: ${result.error}`, {
+                nodeId: node.id
+              });
+            }
+
+            events.push({
+              nodeId: node.id,
+              timestamp: new Date(),
+              status: "completed",
+              input: { code, context },
+              output: nodeOutputs[node.id]
+            });
+            
           } else if (node.type === "condition") {
             const condition = node.config.condition;
             const conditionValue = this.evaluateCondition(condition, nodeInputs);
@@ -494,12 +746,7 @@ export class WorkflowExecutionEngine {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           
-          this.logger.error('Node execution failed', {
-            executionId,
-            nodeId: node.id,
-            nodeType: node.type,
-            error: errorMessage
-          });
+          this.logger.error(`Node execution failed: ${errorMessage}`);
 
           events.push({
             nodeId: node.id,
@@ -522,12 +769,26 @@ export class WorkflowExecutionEngine {
 
       const duration = Date.now() - startTime;
       
-      this.logger.info('Workflow execution completed successfully', {
-        executionId,
+      this.logger.info(`Workflow execution completed successfully in ${duration}ms`);
+
+      // Track successful workflow execution in analytics
+      this.analyticsService.trackWorkflowExecution({
         workflowId: workflow.id,
+        workflowName: workflow.name,
+        executionId,
         duration,
-        nodeCount: workflow.nodes.length,
-        eventCount: events.length
+        nodeExecutions: events
+          .filter(event => event.status === 'completed')
+          .map(event => {
+            const node = workflow.nodes.find(n => n.id === event.nodeId);
+            return {
+              nodeId: event.nodeId,
+              nodeType: node?.type || 'unknown',
+              duration: 0, // Duration not tracked at node level in this version
+              success: true
+            };
+          }),
+        success: true
       });
 
       return {
@@ -540,10 +801,25 @@ export class WorkflowExecutionEngine {
       const duration = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
       
-      this.logger.error('Workflow execution failed', {
-        executionId,
+      this.logger.error(`Workflow execution failed: ${errorMessage}`);
+
+      // Track failed workflow execution in analytics
+      this.analyticsService.trackWorkflowExecution({
         workflowId: workflow.id,
+        workflowName: workflow.name,
+        executionId,
         duration,
+        nodeExecutions: events
+          .map(event => {
+            const node = workflow.nodes.find(n => n.id === event.nodeId);
+            return {
+              nodeId: event.nodeId,
+              nodeType: node?.type || 'unknown',
+              duration: 0,
+              success: event.status === 'completed'
+            };
+          }),
+        success: false,
         error: errorMessage
       });
 

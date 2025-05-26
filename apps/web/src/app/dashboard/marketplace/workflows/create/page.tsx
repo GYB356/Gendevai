@@ -46,6 +46,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import { CodeGenNode, DebugAssistNode, ResourceOptNode } from '@/components/workflow/advanced-nodes';
+import { CodeGenConfig, DebugAssistConfig, ResourceOptConfig } from '@/components/workflow/node-configs';
 
 // Custom node components
 const SkillNode = ({ data, isConnectable }: any) => {
@@ -107,6 +109,9 @@ const nodeTypes: NodeTypes = {
   input: InputNode,
   output: OutputNode,
   condition: ConditionNode,
+  codeGen: CodeGenNode,
+  debugAssist: DebugAssistNode,
+  resourceOpt: ResourceOptNode,
 };
 
 // Main workflow editor component
@@ -121,6 +126,8 @@ export default function WorkflowBuilderPage() {
   const [nodeName, setNodeName] = useState('');
   const [nodeType, setNodeType] = useState('skill');
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const { toast } = useToast();
@@ -301,6 +308,54 @@ export default function WorkflowBuilderPage() {
     setSelectedSkill(null);
   };
 
+  // Handle node selection for configuration
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    if (['codeGen', 'debugAssist', 'resourceOpt'].includes(node.type)) {
+      setSelectedNode(node);
+      setIsConfigOpen(true);
+    }
+  }, []);
+
+  // Update node config
+  const handleUpdateNodeConfig = useCallback((config: Record<string, any>) => {
+    if (!selectedNode) return;
+
+    setNodes((nds: Node[]) =>
+      nds.map((node: Node) => {
+        if (node.id === selectedNode.id) {
+          // Save config to node data
+          node.data = {
+            ...node.data,
+            config
+          };
+        }
+        return node;
+      })
+    );
+  }, [selectedNode, setNodes]);
+
+  // Close config dialog
+  const handleCloseConfig = useCallback(() => {
+    setIsConfigOpen(false);
+    setSelectedNode(null);
+  }, []);
+
+  // Get config component based on node type
+  const getConfigComponent = useCallback(() => {
+    if (!selectedNode) return null;
+
+    switch (selectedNode.type) {
+      case 'codeGen':
+        return <CodeGenConfig node={selectedNode} onUpdateConfig={handleUpdateNodeConfig} />;
+      case 'debugAssist':
+        return <DebugAssistConfig node={selectedNode} onUpdateConfig={handleUpdateNodeConfig} />;
+      case 'resourceOpt':
+        return <ResourceOptConfig node={selectedNode} onUpdateConfig={handleUpdateNodeConfig} />;
+      default:
+        return null;
+    }
+  }, [selectedNode, handleUpdateNodeConfig]);
+
   // Create drag handlers for the sidebar
   const onDragStart = (event: React.DragEvent<HTMLDivElement>, nodeType: string, skillId?: string) => {
     event.dataTransfer.setData('application/reactflow/type', nodeType);
@@ -387,6 +442,35 @@ export default function WorkflowBuilderPage() {
                 <div className="text-xs text-gray-500 truncate">{skill.description}</div>
               </div>
             ))}
+            
+            <h3 className="font-medium mb-2 mt-6">Advanced AI Workflows</h3>
+            
+            <div 
+              className="border-2 border-dashed border-emerald-300 p-3 rounded-md cursor-move bg-emerald-50 hover:bg-emerald-100"
+              draggable
+              onDragStart={(event) => onDragStart(event, 'codeGen')}
+            >
+              <div className="font-medium text-sm">Natural Language Code Gen</div>
+              <div className="text-xs text-gray-500">Generate code from natural language</div>
+            </div>
+            
+            <div 
+              className="border-2 border-dashed border-red-300 p-3 rounded-md cursor-move bg-red-50 hover:bg-red-100"
+              draggable
+              onDragStart={(event) => onDragStart(event, 'debugAssist')}
+            >
+              <div className="font-medium text-sm">AI Debugging Assistant</div>
+              <div className="text-xs text-gray-500">Fix and explain code errors</div>
+            </div>
+            
+            <div 
+              className="border-2 border-dashed border-indigo-300 p-3 rounded-md cursor-move bg-indigo-50 hover:bg-indigo-100"
+              draggable
+              onDragStart={(event) => onDragStart(event, 'resourceOpt')}
+            >
+              <div className="font-medium text-sm">Resource Optimizer</div>
+              <div className="text-xs text-gray-500">Optimize code for resource usage</div>
+            </div>
           </div>
           
           <Dialog open={isAddingNode} onOpenChange={setIsAddingNode}>
@@ -413,6 +497,9 @@ export default function WorkflowBuilderPage() {
                       <SelectItem value="output">Output</SelectItem>
                       <SelectItem value="skill">Skill</SelectItem>
                       <SelectItem value="condition">Condition</SelectItem>
+                      <SelectItem value="codeGen">Natural Language Code Gen</SelectItem>
+                      <SelectItem value="debugAssist">AI Debugging Assistant</SelectItem>
+                      <SelectItem value="resourceOpt">Resource Optimizer</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -452,6 +539,13 @@ export default function WorkflowBuilderPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* Configuration Dialog for advanced nodes */}
+          <Dialog open={isConfigOpen} onOpenChange={handleCloseConfig}>
+            <DialogContent className="sm:max-w-[600px]">
+              {getConfigComponent()}
+            </DialogContent>
+          </Dialog>
         </div>
         
         <div className="col-span-5 border rounded-lg" ref={reactFlowWrapper}>
@@ -467,6 +561,7 @@ export default function WorkflowBuilderPage() {
               onDragOver={onDragOver}
               nodeTypes={nodeTypes}
               fitView
+              onNodeClick={onNodeClick}
             >
               <Controls />
               <Background gap={16} size={1} />
