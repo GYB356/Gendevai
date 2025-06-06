@@ -7,7 +7,7 @@
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
     "test": "turbo test",
-    "test:watch": "turbo test:watch", 
+    "test:watch": "turbo test:watch",
     "test:coverage": "turbo test:coverage",
     "test:changed": "turbo test:changed",
     "type-check": "turbo type-check",
@@ -38,6 +38,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "lucide-react": "^0.511.0"
+    "lucide-react": "^0.511.0",
+    "express": "4.18.2"
   }
 }
